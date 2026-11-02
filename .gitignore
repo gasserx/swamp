@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.bak*
+app/skins/art/*.svg
+app/assets/src/*.svg
+app/assets/src/*.png

@@ -1,0 +1,49 @@
+#!/bin/bash
+# swamp [--enqueue] [files | folders | urls ...]   start sWamp, or hand files to it
+# swamp ipc <function> [arg]                        control a running sWamp
+#                                                   (play, pause, next, skin <id>, status, ...)
+set -uo pipefail
+
+self=$(readlink -f -- "${BASH_SOURCE[0]}")
+APP=$(cd -- "$(dirname -- "$self")/../app" && pwd)
+
+running() { pgrep -f -- "qs -p $APP\$" >/dev/null; }
+ipc() { qs -p "$APP" ipc call swamp "$@"; }
+
+if [[ ${1:-} == ipc ]]; then
+  shift
+  running || { echo "sWamp is not running" >&2; exit 1; }
+  ipc "$@"
+  exit
+fi
+
+mode=open
+[[ ${1:-} == --enqueue ]] && { mode=enqueue; shift; }
+paths=()
+for a in "$@"; do
+  if [[ $a == file://* ]]; then
+    a=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1][7:]))' "$a")
+  fi
+  if [[ $a == *://* ]]; then paths+=("$a"); else paths+=("$(realpath -- "$a")"); fi
+done
+joined=$(printf '%s\n' "${paths[@]}")
+joined=${joined%$'\n'}
+
+if running; then
+  if [[ -n $joined ]]; then
+    ipc "$mode" "$joined" >/dev/null
+    ipc restore >/dev/null
+  else
+    # no files (bar button / launcher): behave like a taskbar entry —
+    # hidden -> restore, focused -> minimize, elsewhere -> bring here
+    ws=$(hyprctl clients -j | jq -r '.[] | select(.title == "sWamp") | .workspace.name' | head -1)
+    focused=$(hyprctl activewindow -j | jq -r '.title // empty')
+    if [[ $ws != special:* && $focused == sWamp ]]; then
+      ipc minimize >/dev/null
+    else
+      ipc restore >/dev/null
+    fi
+  fi
+else
+  SWAMP_OPEN="$joined" setsid -f qs -p "$APP" >/dev/null 2>&1
+fi
