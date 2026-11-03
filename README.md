@@ -35,6 +35,7 @@ Omarchy (Hyprland + the Omarchy shell) already ships most of these: `quickshell`
 - Plays MP3, FLAC, OGG/Opus, M4A/AAC, WAV, WMA and more, plus `.m3u` playlists and http(s) streams
 - Live 19-band spectrum analyzer with falling peaks (reads PipeWire's sink monitor, no extra packages)
 - Playlist with **folder view**: libraries spread over several folders show collapsible folders with track counts and total time. Handles 20 000+ tracks, and tags are probed in parallel and cached.
+- **Search** the playlist (FIND, `/` or Ctrl+F): filters by artist, title, file or folder name as you type, without changing the play order
 - Drag & drop, **+FILE / +DIR / +URL**, mounted network shares
 - 20 vintage picture skins with a skin picker (snapshot of the player in each skin) and a live preview bar
 - Resizable (corner grip, Ctrl + wheel, Ctrl +/−/0); maximize keeps the Omarchy bar visible and stretches the layout
@@ -55,7 +56,10 @@ Omarchy (Hyprland + the Omarchy shell) already ships most of these: `quickshell`
 | L | add files | Delete | remove selected |
 | Enter | play selected | Ctrl+A | select all |
 | K / Shift+K | browse skins | F11 | maximize |
-| Ctrl + / − / 0 | size bigger / smaller / reset | Esc | close picker / cancel browse |
+| / or Ctrl+F | search the playlist | Esc | clear search / close picker / cancel browse |
+| Ctrl + / − / 0 | size bigger / smaller / reset | | |
+
+In the search box: ↑ / ↓ move through the matches, Enter plays one, Esc clears the search.
 
 Right-click the title bar or click the ♪ badge to open the skin picker.
 
@@ -68,6 +72,7 @@ swamp ipc toggle                  # play/pause; also: play pause stop next prev
 swamp ipc status                  # "playing<TAB>Artist - Title"
 swamp ipc skin vhs                # switch skin (list them with: swamp ipc skins)
 swamp ipc scale 2                 # window size
+swamp ipc search "live usa"       # filter the playlist (swamp ipc searchClear to reset)
 swamp ipc minimize | restore | fullscreen | quit
 ```
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "gasserx.swamp",
   "name": "sWamp",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "author": "gasserx",
   "license": "MIT",
   "description": "Retro late-90s style music player with a spectrum analyzer, playlist with folder view and 20 vintage picture skins. Adds a gold sWAMP button to the bar.",

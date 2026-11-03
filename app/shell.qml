@@ -127,6 +127,24 @@ ShellRoot {
   property var groups: ({})          // dir -> { items: [track indices], dur }
   property var groupOrder: []
   property var selSet: ({})          // track indices currently selected
+  // search: the playlist shows only matching tracks (play order is untouched)
+  property string query: ""
+  property var hits: null            // track index -> true while searching, else null
+  property int hitCount: 0
+  property var searchShut: ({})      // folders closed by hand during this search
+  readonly property bool searching: hits !== null
+  function dirItems(d) {
+    const gr = groups[d]
+    if (!gr) return []
+    return hits ? gr.items.filter(k => hits[k]) : gr.items
+  }
+  function setQuery(q) {
+    if (q === query) return
+    query = q
+    searchShut = ({})
+    searchTimer.restart()
+  }
+  Timer { id: searchTimer; interval: 90; onTriggered: { root.rebuildView(); list.positionViewAtBeginning() } }
   readonly property string curDir: track ? dirOf(track.path) : ""
   function dirOf(p) { const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i) : "/" }
   function trackRow(ti, n, d) {
@@ -136,17 +154,26 @@ ShellRoot {
     const order = [], g = {}
     let total = 0
     const sel = {}
+    // every word of the query must appear in artist, title or path (any case)
+    const words = query.toLowerCase().split(/\s+/).filter(w => w)
+    const hit = words.length ? {} : null
+    let nhit = 0
     for (let k = 0; k < tracks.count; k++) {
       const t = tracks.get(k), d = dirOf(t.path)
       if (!g[d]) { g[d] = { items: [], dur: 0 }; order.push(d) }
       g[d].items.push(k); g[d].dur += t.dur; total += t.dur
       if (t.sel) sel[k] = true
+      if (hit) {
+        const hay = (t.artist + "\n" + t.title + "\n" + t.path).toLowerCase()
+        if (words.every(w => hay.indexOf(w) >= 0)) { hit[k] = true; nhit++ }
+      }
     }
     groups = g; groupOrder = order; selSet = sel; totalTime = total
+    hits = hit; hitCount = nhit
     grouped = order.length > 1
     const rows = []
     if (!grouped) {
-      for (let k = 0; k < tracks.count; k++) rows.push(trackRow(k, k + 1, ""))
+      for (let k = 0; k < tracks.count; k++) if (!hit || hit[k]) rows.push(trackRow(k, k + 1, ""))
     } else {
       // label folders relative to the deepest folder they all share
       let common = order[0].split("/")
@@ -157,12 +184,18 @@ ShellRoot {
       }
       const cut = common.join("/").length
       for (const d of order) {
-        const gr = g[d], open = !!openDirs[d]
+        const gr = g[d]
+        // while searching: only folders with matches, opened, showing just the matches
+        const items = hit ? gr.items.filter(k => hit[k]) : gr.items
+        if (!items.length) continue
+        const open = hit ? !searchShut[d] : !!openDirs[d]
+        let dur = gr.dur
+        if (hit) { dur = 0; for (const k of items) dur += tracks.get(k).dur }
         let label = d.slice(cut).replace(/^\/+/, "")
         if (!label) label = d.split("/").pop() || d
-        rows.push({ kind: "dir", ti: gr.items[0], n: 0, dir: d, label: label, count: gr.items.length,
-                    gdur: gr.dur, open: open, dsel: false })
-        if (open) gr.items.forEach((ti, j) => rows.push(trackRow(ti, j + 1, d)))
+        rows.push({ kind: "dir", ti: items[0], n: 0, dir: d, label: label, count: items.length,
+                    gdur: dur, open: open, dsel: false })
+        if (open) for (const ti of items) rows.push(trackRow(ti, gr.items.indexOf(ti) + 1, d))
       }
     }
     const y = list.contentY
@@ -174,16 +207,19 @@ ShellRoot {
   // open/close one folder: insert or remove just its rows
   function toggleDir(r) {
     const v = view.get(r), d = v.dir, gr = groups[d]
-    const o = Object.assign({}, openDirs)
+    const items = dirItems(d)
+    // during a search, open/close is temporary and doesn't touch the saved folder state
+    const o = Object.assign({}, searching ? searchShut : openDirs)
     if (v.open) {
-      delete o[d]
+      if (searching) o[d] = true; else delete o[d]
       view.setProperty(r, "open", false)
-      if (gr && gr.items.length) view.remove(r + 1, gr.items.length)
+      if (items.length) view.remove(r + 1, items.length)
     } else {
-      o[d] = true
+      if (searching) delete o[d]; else o[d] = true
       view.setProperty(r, "open", true)
-      if (gr) for (let j = gr.items.length - 1; j >= 0; j--) view.insert(r + 1, trackRow(gr.items[j], j + 1, d))
+      for (let j = items.length - 1; j >= 0; j--) view.insert(r + 1, trackRow(items[j], gr.items.indexOf(items[j]) + 1, d))
     }
+    if (searching) { searchShut = o; return }
     openDirs = o
     saveTimer.restart()
   }
@@ -191,7 +227,43 @@ ShellRoot {
   function rowTracks(r) {
     const v = view.get(r)
     if (v.kind === "track") return [v.ti]
-    return groups[v.dir] ? groups[v.dir].items : []
+    return dirItems(v.dir)
+  }
+  // search box: move the selection through the matching tracks / play it
+  function searchStep(dir) {
+    if (!view.count) return
+    let r = -1
+    for (let i = 0; i < view.count; i++) if (view.get(i).kind === "track" && selSet[view.get(i).ti]) { r = i; break }
+    let i = r < 0 ? (dir > 0 ? 0 : view.count - 1) : r + dir
+    while (i >= 0 && i < view.count && view.get(i).kind !== "track") i += dir
+    if (i < 0 || i >= view.count) return
+    selectRows([i]); list.anchorRow = i
+    list.positionViewAtIndex(i, ListView.Contain)
+  }
+  function searchPlay() {
+    let first = -1
+    for (let i = 0; i < view.count; i++) {
+      const v = view.get(i)
+      if (v.kind !== "track") continue
+      if (selSet[v.ti]) { playIndex(v.ti); return }
+      if (first < 0) first = v.ti
+    }
+    if (first >= 0) playIndex(first)
+  }
+  function openSearch() {
+    if (!showPlaylist) showPlaylist = true
+    skinPicker = false
+    urlBox.visible = false
+    searchBox.visible = true
+    searchInput.forceActiveFocus()
+    searchInput.selectAll()
+  }
+  function closeSearch() {
+    searchInput.text = ""
+    setQuery("")
+    searchTimer.stop(); rebuildView()
+    searchBox.visible = false
+    stage.forceActiveFocus()
   }
   function setSel(want) {
     for (const k in selSet) if (!want[k]) tracks.setProperty(Number(k), "sel", false)
@@ -550,6 +622,8 @@ ShellRoot {
       const st = root.playing ? "playing" : root.paused ? "paused" : "stopped"
       return st + "\t" + (root.track ? root.trackName(root.current) : "")
     }
+    function search(q: string): void { root.openSearch(); searchInput.text = q }
+    function searchClear(): void { root.closeSearch() }
     function quit(): void { Qt.quit() }
   }
 
@@ -646,7 +720,9 @@ ShellRoot {
       }
 
       Keys.onPressed: e => {
-        if (urlBox.visible) return
+        if (urlBox.visible || searchInput.activeFocus) return
+        if (e.key === Qt.Key_Slash || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { root.openSearch(); e.accepted = true; return }
+        if (e.key === Qt.Key_Escape && root.searching && !root.skinPicker) { root.closeSearch(); e.accepted = true; return }
         if (e.key === Qt.Key_Escape && root.skinPicker) { root.skinPicker = false; e.accepted = true; return }
         if (root.skinBrowse) {
           const bk = e.key
@@ -681,7 +757,7 @@ ShellRoot {
           const ks = Object.keys(root.selSet).map(Number)
           if (ks.length) root.playIndex(Math.min.apply(null, ks))
         } else if (k === Qt.Key_A && (e.modifiers & Qt.ControlModifier)) {
-          const w = {}; for (let i = 0; i < tracks.count; i++) w[i] = true; root.setSel(w)
+          const w = {}; for (let i = 0; i < tracks.count; i++) if (!root.hits || root.hits[i]) w[i] = true; root.setSel(w)
         } else return
         e.accepted = true
       }
@@ -1073,9 +1149,9 @@ ShellRoot {
             Text {
               textFormat: Text.PlainText
               anchors.centerIn: parent
-              visible: tracks.count === 0
+              visible: tracks.count === 0 || (root.searching && !root.hitCount)
               horizontalAlignment: Text.AlignHCenter
-              text: "drag & drop music here\nor use +FILE / +DIR / +URL below\n\nnetwork share? mount it, then +DIR"
+              text: tracks.count && root.searching ? "no tracks match \u201C" + root.query + "\u201D" : "drag & drop music here\nor use +FILE / +DIR / +URL below\n\nnetwork share? mount it, then +DIR"
               color: Skin.s.lcdHint
               font.family: Skin.s.lcdFont; font.pointSize: 4.5; font.bold: true
               lineHeight: 1.2
@@ -1108,12 +1184,56 @@ ShellRoot {
         Row {
           x: 6; y: pl.height - 17
           spacing: 2
-          visible: !urlBox.visible
+          visible: !urlBox.visible && !searchBox.visible
           Btn { width: 30; height: 12; label: "+FILE"; labelSize: 5; onClicked: openDialog.open() }
           Btn { width: 28; height: 12; label: "+DIR"; labelSize: 5; onClicked: dirDialog.open() }
-          Btn { width: 28; height: 12; label: "+URL"; labelSize: 5; onClicked: { urlBox.visible = true; urlInput.text = ""; urlInput.forceActiveFocus() } }
+          Btn { width: 28; height: 12; label: "+URL"; labelSize: 5; onClicked: { searchBox.visible = false; urlBox.visible = true; urlInput.text = ""; urlInput.forceActiveFocus() } }
           Btn { width: 26; height: 12; label: "REM"; labelSize: 5; onClicked: root.removeSelected() }
           Btn { width: 26; height: 12; label: "CLR"; labelSize: 5; onClicked: root.clearList() }
+          Btn { width: 28; height: 12; label: "FIND"; labelSize: 5; onClicked: root.openSearch() }
+        }
+
+        // search (/ or Ctrl+F): filters the playlist as you type
+        Bevel {
+          id: searchBox
+          visible: false
+          x: 6; y: pl.height - 17; width: 180 + root.ex; height: 12
+          sunken: true
+          fill: Skin.s.lcdBg
+          TextInput {
+            id: searchInput
+            x: 2; width: parent.width - hitTxt.width - 6
+            anchors.verticalCenter: parent.verticalCenter
+            color: Skin.s.lcdText
+            selectionColor: Skin.s.selBg
+            font.family: Skin.s.lcdFont; font.pointSize: 4.5; font.bold: true
+            clip: true
+            onTextChanged: root.setQuery(text.trim())
+            Text {
+              textFormat: Text.PlainText
+              visible: !searchInput.text
+              text: "search artist, title, folder...  [esc]"
+              color: Skin.s.lcdHint
+              font: searchInput.font
+            }
+            Keys.onPressed: e => {
+              if (e.key === Qt.Key_Escape) root.closeSearch()
+              else if (e.key === Qt.Key_Down) root.searchStep(1)
+              else if (e.key === Qt.Key_Up) root.searchStep(-1)
+              else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) root.searchPlay()
+              else return
+              e.accepted = true
+            }
+          }
+          Text {
+            id: hitTxt
+            textFormat: Text.PlainText
+            anchors.right: parent.right; anchors.rightMargin: 2
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.searching ? root.hitCount + " / " + tracks.count : ""
+            color: root.searching && !root.hitCount ? Skin.s.lcdWarn || Skin.s.lcdHint : Skin.s.lcdHint
+            font.family: Skin.s.lcdFont; font.pointSize: 4.2; font.bold: true
+          }
         }
 
         // URL entry (http streams / files on a home server)
