@@ -324,16 +324,17 @@ ShellRoot {
       onExited: { flush(); destroy() }
     }
   }
-  // list file written by the launcher (0600 in $XDG_RUNTIME_DIR); the helper reads and deletes it
+  // list file written by the launcher (0600 in $XDG_RUNTIME_DIR); the helper checks it
+  // really is one, reads it and deletes it. Separate from the path stream on purpose.
   function addListFile(file, playFirst) {
     flash("LOADING...")
-    probeJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: "@" + file + "\n", playFirst: !!playFirst })
+    probeJob.createObject(root, { command: ["python3", helper, "probe-list", file], playFirst: !!playFirst })
   }
   function addPaths(paths, playFirst) {
     paths = paths.filter(p => p && p.length)
     if (!paths.length) return
     flash("LOADING " + paths.length + (paths.length === 1 ? " ITEM..." : " ITEMS..."))
-    probeJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: paths.join("\n") + "\n", playFirst: !!playFirst })
+    probeJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: paths.join("\u0000") + "\u0000", playFirst: !!playFirst })
   }
 
   // ---- transport -----------------------------------------------------------

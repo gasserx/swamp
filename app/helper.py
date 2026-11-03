@@ -13,6 +13,8 @@ import json
 import urllib.parse
 import math
 import os
+import re
+import stat
 import subprocess
 import sys
 import threading
@@ -288,25 +290,53 @@ def place(title, w, h):
                   "dispatch hl.dsp.window.move({ x = %d, y = %d, %s })" % (w, h, sel, x, y, sel))
 
 
+LIST_NAME = re.compile(r"swamp-list\.[A-Za-z0-9]{6,}")
+
+
+def take_list(path):
+    """Read and delete a launcher list file, but only a genuine one: named
+    swamp-list.XXXXXX directly in $XDG_RUNTIME_DIR (or /tmp), a regular file
+    (no symlink) owned by us and not readable by anyone else. Anything else
+    is ignored and left alone."""
+    base = os.path.realpath(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+    name = os.path.basename(path)
+    if not LIST_NAME.fullmatch(name) or os.path.realpath(os.path.dirname(path)) != base:
+        return []
+    path = os.path.join(base, name)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return []
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            return []
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+            fd = None
+            data = fh.read()
+    finally:
+        if fd is not None:
+            os.close(fd)
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return [x for x in data.split("\0") if x]
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "probe" and args == ["-"]:
-        # paths on stdin (keeps URLs out of the process list); "@file" = a list file
-        # from the launcher, read and then deleted
-        args = []
-        for line in sys.stdin.read().split("\n"):
-            if line.startswith("@"):
-                try:
-                    with open(line[1:], encoding="utf-8") as fh:
-                        args += [x for x in fh.read().split("\n") if x]
-                    os.unlink(line[1:])
-                except OSError:
-                    pass
-            elif line:
-                args.append(line)
+        # NUL-separated paths on stdin (keeps URLs out of the process list). Nothing
+        # in this stream is ever treated as a command, whatever the names contain.
+        args = [x for x in sys.stdin.read().split("\0") if x]
+    elif cmd == "probe-list":
+        # a list file written by the launcher: read it, then delete it
+        args = take_list(args[0]) if args else []
+        cmd = "probe"
     if cmd == "probe":
         def expand():
             for a in args:

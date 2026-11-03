@@ -34,7 +34,7 @@ if running; then
     # hand the list over in a private file, not on the qs command line (stream URLs
     # can carry credentials, and process arguments are visible to other users)
     list=$(umask 077; mktemp "${XDG_RUNTIME_DIR:-/tmp}/swamp-list.XXXXXX") || exit 1
-    printf '%s\n' "$joined" > "$list"
+    printf '%s\0' "${paths[@]}" > "$list"
     ipc "${mode}List" "$list" >/dev/null || rm -f -- "$list"
     ipc restore >/dev/null
   else
