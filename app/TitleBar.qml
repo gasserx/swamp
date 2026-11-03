@@ -25,8 +25,8 @@ Item {
   readonly property string style: Skin.s.stripes
   // the two decorated spans, left and right of the label
   readonly property var spans: [
-    { x: t.showLogo ? 18 : 6, w: Math.max(0, label.x - (t.showLogo ? 22 : 10)) },
-    { x: label.x + label.width + 4, w: Math.max(0, btnRow.x - (label.x + label.width + 4) - 5) }
+    { x: t.showLogo ? 18 : 6, w: Math.max(0, label.x - (t.showLogo ? 22 : 10)), side: 0 },
+    { x: label.x + label.width + 4, w: Math.max(0, btnRow.x - (label.x + label.width + 4) - 5), side: 1 }
   ]
 
   Rectangle {
@@ -56,6 +56,29 @@ Item {
       // solid: one bar with an underline
       Rectangle { visible: t.style === "solid"; y: 4.5; width: parent.width; height: 3.2; radius: Skin.s.radius > 0 ? 1.6 : 0; color: t.ca }
       Rectangle { visible: t.style === "solid"; y: 8.6; width: parent.width; height: 0.7; color: t.cb }
+      // double: two bars that fade out towards the outer ends
+      Repeater {
+        model: t.style === "double" ? 2 : 0
+        Rectangle {
+          id: dbar
+          required property int index
+          readonly property color c: index ? t.cb : t.ca
+          readonly property color fade: Qt.rgba(c.r, c.g, c.b, 0)
+          readonly property bool onLeft: parent.modelData.side === 0
+          y: 4.3 + index * 3.3
+          width: parent.width
+          height: 2.1
+          radius: Skin.s.radius > 0 ? 1 : 0
+          gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0; color: dbar.fade }
+            GradientStop { position: 0.75; color: dbar.c }
+            GradientStop { position: 1; color: dbar.c }
+          }
+          // the right-hand span fades the other way
+          transform: Scale { origin.x: dbar.width / 2; xScale: dbar.onLeft ? 1 : -1 }
+        }
+      }
       // dots: two rows of speaker-grille dots
       Repeater {
         model: t.style === "dots" ? Math.floor(parent.width / 2.4) * 2 : 0

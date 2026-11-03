@@ -6,7 +6,7 @@ A gold **sWAMP** button in the Omarchy bar opens it, brings it to you or minimiz
 
 ![sWamp with the Disco Fever skin](docs/main.png)
 
-<p align="center"><img src="docs/skins-trio.png" alt="Night Drive, Jukebox and VHS skins"></p>
+<p align="center"><img src="docs/skins-trio.png" alt="Surf Shack, Velvet Lounge and Gruvbox skins"></p>
 
 ## Install
 

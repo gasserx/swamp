@@ -750,17 +750,19 @@ def blackvinyl():
 
 
 def nightdrive():
+    # black with near-black reds; the whites are only a faint trace
     s = Svg(42)
-    s.rect(s.lin([(0, "#000000"), (1, "#0d0d10")]))
-    s.stars(150, 0, 170, ("#eef0f3", "#c9ced6"))
-    striped_sun(s, 80, 72, 26, s.lin([(0, "#f3efe4"), (1, "#c9ced6")]), "#000000", 5, 0.1)
-    band(s, ["#7a0f1a", "#e63946", "#c9ced6", "#eef0f3"], 128, 10, 2.0, 4, 0.02, 0.05, 0.9)
-    s.ridge(232, 196, 7, "#121216")
-    s.path(f"M0 232 L{W} 232", extra='stroke="#e63946" stroke-width="0.6" opacity="0.8"')
-    s.rect("#070708", 0, 232, W, H - 232)
+    s.rect(s.lin([(0, "#000000"), (1, "#0a0506")]))
+    s.stars(90, 0, 170, ("#2e2a2c", "#3a3436"), big=0.0, amin=0.3)
+    s.glow(80, 72, 46, "#e63946", 0.05)
+    striped_sun(s, 80, 72, 26, s.lin([(0, "#3d0b10"), (1, "#1c0407")]), "#000000", 5, 0.1)
+    band(s, ["#120305", "#1a0407", "#24060a", "#300a0e"], 128, 10, 2.0, 4, 0.02, 0.05, 0.9)
+    s.ridge(232, 196, 7, "#0c0a0b")
+    s.path(f"M0 232 L{W} 232", extra='stroke="#e63946" stroke-width="0.6" opacity="0.25"')
+    s.rect("#050405", 0, 232, W, H - 232)
     for i in range(6):
         y = 238 + i * 9
-        s.rect("#c9ced6", 130 - i * 3, y, 15 + i * 6, 1.2, 'opacity="0.35"')
+        s.rect("#c9ced6", 130 - i * 3, y, 15 + i * 6, 1.2, 'opacity="0.06"')
     return s
 
 
