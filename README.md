@@ -2,7 +2,8 @@
 
 A retro, late-90s style music player for [Omarchy](https://omarchy.org), built with Quickshell.
 It has a spectrum analyzer, a playlist with a folder view for big libraries, and 20 vintage picture skins.
-A gold **sWAMP** button in the Omarchy bar opens it, brings it to you or minimizes it, and its tooltip shows what's playing.
+A gold **sWamp** button in the Omarchy bar opens it, brings it to you or minimizes it, and its tooltip shows what's playing.
+Update includes find/search function.
 
 ![sWamp with the Disco Fever skin](docs/main.png)
 
