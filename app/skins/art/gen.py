@@ -685,7 +685,7 @@ def hemp_plant(s, x, base, h, greens):
     s.add(hemp_leaf(s, x + sway * 0.6, base - h, h * 0.2, s.r.uniform(-8, 8), greens[0]))
 
 
-def avocado():
+def grow():
     s = Svg(35)
     s.rect(s.lin([(0, "#14170a"), (0.6, "#262a14"), (1, "#3a3a1a")]))
     s.glow(200, 60, 70, "#c9b037", 0.25)
@@ -712,7 +712,7 @@ def cosmicfunk():
     return s
 
 
-SCENES.update({f.__name__: f for f in [disco, route66, surfshack, velvet, avocado, cosmicfunk]})
+SCENES.update({f.__name__: f for f in [disco, route66, surfshack, velvet, grow, cosmicfunk]})
 
 
 # ---- vintage set (2026-11-02) ---------------------------------------------

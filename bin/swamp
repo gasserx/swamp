@@ -35,10 +35,11 @@ if running; then
     ipc restore >/dev/null
   else
     # no files (bar button / launcher): behave like a taskbar entry —
-    # hidden -> restore, focused -> minimize, elsewhere -> bring here
-    ws=$(hyprctl clients -j | jq -r '.[] | select(.title == "sWamp") | .workspace.name' | head -1)
-    focused=$(hyprctl activewindow -j | jq -r '.title // empty')
-    if [[ $ws != special:* && $focused == sWamp ]]; then
+    # showing on a monitor -> minimize, minimized or on another workspace -> bring here.
+    # (Not based on focus: with focus-follows-mouse, moving the pointer to the bar can
+    # hand focus to another window, which made the first click "restore" instead.)
+    wsid=$(hyprctl clients -j | jq -r '.[] | select(.title == "sWamp") | .workspace.id' | head -1)
+    if [[ -n $wsid ]] && hyprctl monitors -j | jq -e --argjson w "$wsid" 'any(.[]; .activeWorkspace.id == $w)' >/dev/null; then
       ipc minimize >/dev/null
     else
       ipc restore >/dev/null

@@ -30,6 +30,9 @@ ShellRoot {
   readonly property real ex: pw - 275
   readonly property real contentH: 116 + (showPlaylist || skinPicker ? plHeight : 0)
   function setScale(v, quiet) {
+    // never larger than the screen
+    const sc = win.screen
+    if (sc && sc.width > 0) v = Math.min(v, (sc.width - 16) / 275, (sc.height - 46) / contentH)
     v = Math.round(Math.max(minU, Math.min(maxU, v)) * 100) / 100
     if (Math.abs(v - u) < 0.005) return
     u = v
@@ -66,7 +69,50 @@ ShellRoot {
   function endBrowse(keep) { if (!keep && browseFrom) Skin.select(browseFrom); skinBrowse = false }
   function browseTo(i) { if (Skin.pack.length) Skin.select(Skin.pack[Math.max(0, Math.min(Skin.pack.length - 1, i))].id) }
 
-  readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
+  // Snapshot mode (SWAMP_SNAP=<dir>, see skins/snap.sh): a demo playlist that looks like it is
+  // playing; every skin is rendered once to <dir>/<id>.jpg for the skin picker, then it quits.
+  readonly property string snapDir: Quickshell.env("SWAMP_SNAP") || ""
+  readonly property bool snap: snapDir !== ""
+  property int snapI: 0
+  Timer { id: shotTimer; interval: 1200; onTriggered: root.snapStep() }
+  function snapStep() {
+    if (!Skin.pack.length) { shotTimer.restart(); return }
+    if (snapI >= Skin.pack.length) { Qt.quit(); return }
+    const id = Skin.pack[snapI].id
+    if (Skin.name !== id) { Skin.select(id); shotTimer.restart(); return }
+    const k = 2.4
+    root.flashText = ""
+    main.grabToImage(r => {
+      r.saveToFile(snapDir + "/" + id + ".jpg")
+      console.log("snap: " + id)
+      snapI++
+      if (snapI < Skin.pack.length) Skin.select(Skin.pack[snapI].id)
+      shotTimer.restart()
+    }, Qt.size(Math.round(root.pw * k), Math.round(116 * k)))
+  }
+  function snapSetup() {
+    const demo = [
+      ["The Velvet Hours", "Midnight Boulevard", 254], ["Lumen Drive", "Neon Avenue", 231],
+      ["Copper Tides", "Saltwater Radio", 302], ["The Groove Assembly", "Mirrorball Heart", 268],
+      ["Harlow & Finch", "Long Way to Memphis", 289], ["Desert Static", "Highway Mirage", 245],
+      ["Sunday Arcade", "Polaroid Summer", 213], ["Moonlit Brass", "After Hours Swing", 276],
+      ["The Lowland Kings", "Tumbleweed Waltz", 198], ["Kaleido", "Satellite Love", 241],
+      ["Orchid Union", "Velvet Rain", 318], ["Tape Hiss Club", "Rewind the Night", 226],
+      ["Marigold Sound", "Golden Hour Fade", 259], ["Retro Galaxy", "Cosmic Highway", 287]
+    ]
+    tracks.append(demo.map((d, i) => ({ path: "/snap/Demo/" + (i + 1) + ".mp3", artist: d[0], title: d[1], dur: d[2] * 1000,
+                                         kbps: 320, khz: 44, ch: 2, sel: false })))
+    current = 3
+    showPlaylist = false; visOn = true; volume = 0.72
+    shown = [5, 9, 13, 15, 14, 12, 13, 11, 9, 10, 8, 9, 7, 6, 7, 5, 4, 3, 2]
+    peaks = shown.map(v => Math.min(16, v + 2))
+    rebuildView()
+    shotTimer.restart()
+  }
+  readonly property real posMs: snap ? 97000 : player.position
+  readonly property real durMs: snap ? 268000 : player.duration
+
+  readonly property bool playing: snap || player.playbackState === MediaPlayer.PlayingState
   readonly property bool paused: player.playbackState === MediaPlayer.PausedState
   readonly property var track: current >= 0 && current < tracks.count ? tracks.get(current) : null
   readonly property int plHeight: 172
@@ -232,9 +278,11 @@ ShellRoot {
   }
   function restore() {
     Quickshell.execDetached(["bash", "-c",
-      "ws=$(hyprctl activeworkspace -j | jq -r .id); "
-      + "hyprctl dispatch \"hl.dsp.window.move({ workspace = '$ws', window = '" + winSel + "' })\"; "
-      + "hyprctl dispatch \"hl.dsp.focus({ window = '" + winSel + "' })\""])
+      // focusing makes Hyprland warp the pointer to the window's centre: put it back where it was
+      "ws=$(hyprctl activeworkspace -j | jq -r .id); pos=$(hyprctl cursorpos | tr -d ' '); "
+      + "hyprctl --batch \"dispatch hl.dsp.window.move({ workspace = '$ws', window = '" + winSel + "' }) ; "
+      + "dispatch hl.dsp.focus({ window = '" + winSel + "' }) ; "
+      + "dispatch hl.dsp.cursor.move({ x = ${pos%,*}, y = ${pos#*,} })\""])
   }
   function flash(msg) { flashText = msg; flashTimer.restart() }
 
@@ -353,6 +401,7 @@ ShellRoot {
     printErrors: false
   }
   Component.onCompleted: {
+    if (snap) { snapSetup(); return }
     try {
       const s = JSON.parse(stateFile.text() || "{}")
       const saved = (s.tracks || []).map(t => Object.assign({ sel: false, artist: "", dur: 0, kbps: 0, khz: 0, ch: 2 }, t))
@@ -421,7 +470,7 @@ ShellRoot {
 
   // spectrum from the output monitor while something is playing
   Process {
-    running: root.playing && root.visOn && win.visible
+    running: root.playing && root.visOn && win.visible && !root.snap
     command: ["python3", root.helper, "spectrum"]
     stdout: SplitParser { onRead: line => root.levels = line.split(" ").map(Number) }
     onRunningChanged: if (!running) root.levels = []
@@ -429,11 +478,12 @@ ShellRoot {
   Timer {
     interval: 33
     repeat: true
-    running: root.visOn && (root.playing || root.shown.some(v => v > 0) || root.peaks.some(v => v > 0))
+    // keeps running after VIS is switched off (or playback stops) until the bars have fallen to the bottom
+    running: !root.snap && ((root.visOn && root.playing) || root.shown.some(v => v > 0) || root.peaks.some(v => v > 0))
     onTriggered: {
       const s = [], p = []
       for (let i = 0; i < 19; i++) {
-        const target = root.playing ? (root.levels[i] || 0) : 0
+        const target = root.playing && root.visOn ? (root.levels[i] || 0) : 0
         const cur = root.shown[i] || 0
         const v = target > cur ? target : Math.max(0, cur - 0.9)
         s.push(v)
@@ -476,7 +526,7 @@ ShellRoot {
 
   FloatingWindow {
     id: win
-    title: "sWamp"
+    title: root.snap ? "sWamp snapshots" : "sWamp"
     color: Skin.s.windowBg
     readonly property real w: Math.round(275 * root.u)
     readonly property real h: Math.round(root.contentH * root.u)
@@ -507,8 +557,8 @@ ShellRoot {
         }
       }
     }
-    Timer { interval: 400; running: true; onTriggered: floatCheck.running = true }
-    Timer { id: fullTimer; interval: 120; onTriggered: { fullCheck.running = false; fullCheck.running = true } }
+    Timer { interval: 400; running: !root.snap; onTriggered: floatCheck.running = true }
+    Timer { id: fullTimer; interval: 120; onTriggered: if (!root.snap) { fullCheck.running = false; fullCheck.running = true } }
     // after a compositor resize, adopt that size and snap the window back to the player's proportions
     // Hyprland ignores client-side size changes of a mapped floating window,
     // so ask the compositor for the size the player wants
@@ -517,16 +567,23 @@ ShellRoot {
     Timer {
       id: resizeTimer
       interval: 30
-      onTriggered: if (!win.full && (win.width !== win.w || win.height !== win.h))
-        Quickshell.execDetached(["hyprctl", "dispatch",
-          "hl.dsp.window.resize({ x = " + win.w + ", y = " + win.h + ", window = \"title:^(sWamp)$\" })"])
+      onTriggered: if (!root.snap && !win.full && (win.width !== win.w || win.height !== win.h))
+        // keeps the top-left corner in place and the window on screen (helper.py place)
+        Quickshell.execDetached(["python3", root.helper, "place", "sWamp", String(win.w), String(win.h)])
     }
     onWidthChanged: { fullTimer.restart(); snapTimer.restart() }
     onHeightChanged: { fullTimer.restart(); snapTimer.restart() }
     Timer {
       id: snapTimer
       interval: 350
-      onTriggered: if (!win.full && !grip.pressed && win.fit > 0 && Math.abs(win.fit - root.u) > 0.01) root.setScale(win.fit, true)
+      // follow whichever side the user dragged more, then snap back to the player's shape
+      onTriggered: {
+        if (root.snap || win.full || grip.pressed || win.width <= 0 || win.height <= 0) return
+        const fW = win.width / 275, fH = win.height / root.contentH
+        const f = Math.abs(fW - root.u) >= Math.abs(fH - root.u) ? fW : fH
+        if (Math.abs(f - root.u) > 0.01) root.setScale(f, true)
+        if (win.width !== win.w || win.height !== win.h) resizeTimer.restart()
+      }
     }
 
     FileDialog {
@@ -681,12 +738,12 @@ ShellRoot {
             id: clock
             x: 26; y: 3
             spacing: 2.4
-            readonly property int ms: root.showRemaining && player.duration > 0
-                                      ? player.duration - player.position : player.position
+            readonly property int ms: root.showRemaining && root.durMs > 0
+                                      ? root.durMs - root.posMs : root.posMs
             readonly property int secs: Math.floor(ms / 1000)
             readonly property string mm: { const m = Math.min(99, Math.floor(secs / 60)); return (m < 10 ? "0" : "") + m }
             readonly property string ss: { const s = secs % 60; return (s < 10 ? "0" : "") + s }
-            readonly property bool idle: player.playbackState === MediaPlayer.StoppedState
+            readonly property bool idle: !root.snap && player.playbackState === MediaPlayer.StoppedState
             opacity: root.paused && !root.blink ? 0.12 : 1
             Seg { ch: root.showRemaining && !clock.idle ? "-" : " " }
             Seg { ch: clock.idle ? " " : clock.mm[0] }
@@ -822,8 +879,8 @@ ShellRoot {
           id: seek
           x: 9; y: 68; width: 257 + root.ex; height: 10
           thumbW: 22
-          active: player.seekable && player.duration > 0
-          value: player.duration > 0 ? player.position / player.duration : 0
+          active: root.snap || (player.seekable && player.duration > 0)
+          value: root.durMs > 0 ? root.posMs / root.durMs : 0
           onMoved: v => root.flash("SEEK TO " + root.fmt(v * player.duration) + " / " + root.fmt(player.duration) + " (" + Math.round(v * 100) + "%)")
           onReleased: v => { player.position = v * player.duration; root.flashText = "" }
         }
@@ -1060,7 +1117,7 @@ ShellRoot {
           fill: Skin.s.lcdBg
           Text {
             anchors.centerIn: parent
-            text: (root.track ? root.fmt(player.position) : "0:00") + " / " + root.fmt(root.totalTime)
+            text: (root.track ? root.fmt(root.posMs) : "0:00") + " / " + root.fmt(root.totalTime)
             color: Skin.s.lcdText
             font.family: Skin.s.lcdFont; font.pointSize: 4.5; font.bold: true
           }
@@ -1132,17 +1189,22 @@ ShellRoot {
           onRightClicked: root.skinPicker = false
           Btn { icon: "close"; width: 9; height: 9; onClicked: root.skinPicker = false }
         }
-        // 4 columns; rows stretch to fill the panel, and it scrolls when they no longer fit
+        // snapshot previews of the real player in each skin (skins/snap/<id>.jpg, made by skins/snap.sh);
+        // main player only (playlist closed); 2 columns (more when wide), scrolls
         GridView {
           id: skinGrid
           x: 6; y: 17
           width: 263 + root.ex; height: picker.height - 17 - 13
-          readonly property int rows: Math.ceil(count / Math.max(4, Math.floor(width / 64)))
-          cellWidth: width / Math.max(4, Math.floor(width / 64))
-          cellHeight: Math.max(18, Math.min(30, height / Math.max(1, rows)))
+          readonly property int cols: Math.max(2, Math.floor(width / 130))
+          cellWidth: width / cols
+          cellHeight: (cellWidth - 5) * 116 / 275 + 12
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           model: Skin.pack
+          Connections {
+            target: picker
+            function onVisibleChanged() { if (picker.visible) skinGrid.positionViewAtIndex(Math.max(0, root.skinIndex), GridView.Contain) }
+          }
           delegate: Item {
             id: cell
             required property var modelData
@@ -1156,59 +1218,38 @@ ShellRoot {
               fill: cell.cur || cm.containsMouse ? Skin.s.selBg : Skin.s.lcdBg
               opacity: cm.containsMouse && !cell.cur ? 0.85 : 1
             }
-            // miniature of the skin
             Rectangle {
-              id: mini
-              x: 2; y: 2
-              height: parent.height - 4; width: height * 1.5
-              radius: Math.min(cell.sk.radius, 3)
-              border.width: 0.6
-              border.color: cell.cur ? Skin.s.lcdAccent : cell.sk.bevelLight
+              id: shot
+              x: 1.5; y: 1.5
+              width: parent.width - 3; height: width * 116 / 275
               clip: true
+              border.width: cell.cur ? 1 : 0
+              border.color: Skin.s.lcdAccent
+              // fallback while there is no snapshot for this skin
               gradient: Gradient {
                 GradientStop { position: 0; color: cell.sk.chromeTop }
-                GradientStop { position: 1; color: cell.sk.chromeBottom }
+                GradientStop { position: 1; color: cell.sk.plBottom }
               }
               Image {
-                visible: cell.sk.bgImage !== ""
                 anchors.fill: parent
-                source: cell.sk.bgImage !== "" ? Qt.resolvedUrl(cell.sk.bgImage) : ""
-                sourceSize: Qt.size(160, 168)
+                anchors.margins: cell.cur ? 1 : 0
+                source: Qt.resolvedUrl("skins/snap/" + cell.modelData.id + ".jpg")
+                sourceSize.width: 640
                 fillMode: Image.PreserveAspectCrop
                 verticalAlignment: Image.AlignTop
+                asynchronous: true
+                cache: false
+                smooth: true; mipmap: true
               }
-              readonly property real k: height / 13
-              Rectangle { x: 1.5 * mini.k; y: 1.2 * mini.k; width: mini.width - 3 * mini.k; height: 1.4 * mini.k; color: cell.sk.stripeA }
-              Rectangle {
-                x: 2 * mini.k; y: 3.6 * mini.k; width: 0.48 * mini.width; height: 5.4 * mini.k; color: cell.sk.lcdBg
-                radius: Math.min(cell.sk.radius, 1)
-                Rectangle { x: mini.k; y: 1.6 * mini.k; width: 0.6 * parent.width; height: 2.2 * mini.k; color: cell.sk.lcdText }
-              }
-              Rectangle { x: 0.6 * mini.width; y: 3.6 * mini.k; width: 0.32 * mini.width; height: 2.2 * mini.k; color: cell.sk.volB; radius: 0.4 }
-              Rectangle { x: 0.6 * mini.width; y: 6.8 * mini.k; width: 2.2 * mini.k; height: 2.2 * mini.k; color: cell.sk.ledOn; radius: 1.1 * mini.k }
-              Rectangle { x: 0.6 * mini.width + 3.2 * mini.k; y: 6.8 * mini.k; width: 2.2 * mini.k; height: 2.2 * mini.k; color: cell.sk.lcdWarn; radius: 1.1 * mini.k }
-              Rectangle { x: 2 * mini.k; y: 10 * mini.k; width: mini.width - 4 * mini.k; height: 2 * mini.k; color: cell.sk.btnTop; radius: Math.min(cell.sk.radius, 1) }
             }
-            Column {
-              x: mini.x + mini.width + 2
-              width: parent.width - x - 1.5
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: 0.6
-              Text {
-                width: parent.width
-                elide: Text.ElideRight
-                text: cell.modelData.name
-                color: cell.cur ? Skin.s.lcdAccent : Skin.s.lcdText
-                font.family: Skin.s.lcdFont; font.pointSize: 3.55; font.bold: true
-              }
-              Text {
-                visible: skinGrid.cellHeight >= 22
-                width: parent.width
-                elide: Text.ElideRight
-                text: cell.modelData.note || ""
-                color: Skin.s.lcdHint
-                font.family: Skin.s.font; font.pointSize: 2.9
-              }
+            Text {
+              x: 2; y: shot.y + shot.height + 1.2
+              width: parent.width - 4
+              horizontalAlignment: Text.AlignHCenter
+              elide: Text.ElideRight
+              text: cell.modelData.name
+              color: cell.cur ? Skin.s.lcdAccent : Skin.s.lcdText
+              font.family: Skin.s.lcdFont; font.pointSize: 4; font.bold: true
             }
             MouseArea {
               id: cm

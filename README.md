@@ -1,7 +1,7 @@
 # sWamp
 
 A retro, late-90s style music player for [Omarchy](https://omarchy.org), built with Quickshell.
-It has a spectrum analyzer, a playlist with a folder view for big libraries, and 24 vintage picture skins.
+It has a spectrum analyzer, a playlist with a folder view for big libraries, and 20 vintage picture skins.
 A gold **sWAMP** button in the Omarchy bar opens it, brings it to you or minimizes it, and its tooltip shows what's playing.
 
 ![sWamp with the Disco Fever skin](docs/main.png)
@@ -36,7 +36,7 @@ Omarchy (Hyprland + the Omarchy shell) already ships most of these: `quickshell`
 - Live 19-band spectrum analyzer with falling peaks (reads PipeWire's sink monitor, no extra packages)
 - Playlist with **folder view**: libraries spread over several folders show collapsible folders with track counts and total time. Handles 20 000+ tracks, and tags are probed in parallel and cached.
 - Drag & drop, **+FILE / +DIR / +URL**, mounted network shares
-- 24 vintage picture skins with a skin picker and a live preview bar
+- 20 vintage picture skins with a skin picker (snapshot of the player in each skin) and a live preview bar
 - Resizable (corner grip, Ctrl + wheel, Ctrl +/−/0); maximize keeps the Omarchy bar visible and stretches the layout
 - Minimize works like a taskbar: the window parks on a hidden workspace and the bar button brings it back
 - Remembers the playlist, position in the list, volume, skin and size
@@ -81,6 +81,7 @@ Settings and playlist: `~/.local/state/swamp.json`. Tag cache: `~/.cache/swamp/t
 Skins live in `app/skins/skinpack.json`: each one is a set of colours plus optional `bgImage` / `bgOpacity` for a picture behind the panels.
 The pictures are drawn by `app/skins/art/gen.py` (SVG rendered with `rsvg-convert`). Run `python3 gen.py <skin-id>` to re-render one.
 Skin keys that aren't set fall back to the defaults in `app/Skin.qml`.
+After adding or changing a skin, run `app/skins/snap.sh` to re-render the picker previews (`app/skins/snap/<id>.jpg`).
 
 ## License
 

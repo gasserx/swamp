@@ -232,6 +232,35 @@ def spectrum():
         proc.terminate()
 
 
+def place(title, w, h):
+    """Resize the floating window to w x h but keep its top-left corner where it is
+    (Hyprland resizes around the centre), nudged so it stays inside the work area."""
+    import json, subprocess
+    def hy(*a):
+        return subprocess.run(["hyprctl", *a], capture_output=True, text=True).stdout
+    cl = [c for c in json.loads(hy("clients", "-j") or "[]") if c.get("title") == title]
+    if not cl:
+        return
+    c = cl[0]
+    sel = 'window = "address:%s"' % c["address"]
+    w, h = int(w), int(h)
+    x, y = c["at"]
+    mon = next((m for m in json.loads(hy("monitors", "-j") or "[]") if m["id"] == c["monitor"]), None)
+    if mon and not c["workspace"]["name"].startswith("special:"):
+        l, t, r, b = (mon.get("reserved") or [0, 0, 0, 0])
+        sc = mon.get("scale") or 1
+        mw, mh = mon["width"] / sc, mon["height"] / sc
+        if mon.get("transform", 0) % 2:
+            mw, mh = mh, mw
+        x0, y0 = mon["x"] + l, mon["y"] + t
+        x1, y1 = mon["x"] + mw - r, mon["y"] + mh - b
+        x = int(max(x0, min(x, x1 - w)))
+        y = int(max(y0, min(y, y1 - h)))
+    # one batch, so there is no frame at the centred position in between
+    hy("--batch", "dispatch hl.dsp.window.resize({ x = %d, y = %d, %s }) ; "
+                  "dispatch hl.dsp.window.move({ x = %d, y = %d, %s })" % (w, h, sel, x, y, sel))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -253,6 +282,8 @@ def main():
     elif cmd == "m3u":
         for a in args:
             m3u(a)
+    elif cmd == "place":
+        place(*args[:3])
     elif cmd == "spectrum":
         spectrum()
 
