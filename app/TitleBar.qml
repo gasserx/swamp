@@ -145,6 +145,7 @@ Item {
       text: t.xPrefix || "h"
     }
     Text {
+      textFormat: Text.PlainText
       id: pre
       visible: t.xMark && t.xPrefix !== ""
       text: t.xPrefix
@@ -185,6 +186,7 @@ Item {
       smooth: true; mipmap: true
     }
     Text {
+      textFormat: Text.PlainText
       id: amp
       text: t.xMark ? t.title.replace(/^\S\s*/, "").replace(/ /g, "") : t.title
       // picture skins: full-strength title with a dark outline so it reads over any scene

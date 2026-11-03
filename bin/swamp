@@ -31,7 +31,11 @@ joined=${joined%$'\n'}
 
 if running; then
   if [[ -n $joined ]]; then
-    ipc "$mode" "$joined" >/dev/null
+    # hand the list over in a private file, not on the qs command line (stream URLs
+    # can carry credentials, and process arguments are visible to other users)
+    list=$(umask 077; mktemp "${XDG_RUNTIME_DIR:-/tmp}/swamp-list.XXXXXX") || exit 1
+    printf '%s\n' "$joined" > "$list"
+    ipc "${mode}List" "$list" >/dev/null || rm -f -- "$list"
     ipc restore >/dev/null
   else
     # no files (bar button / launcher): behave like a taskbar entry —

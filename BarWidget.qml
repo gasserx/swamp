@@ -55,7 +55,8 @@ BarWidget {
       onRead: line => {
         const parts = line.split("\t")
         root.playState = parts[0] || "off"
-        root.nowPlaying = parts[1] || ""
+        // tags are untrusted: no "<" so the tooltip can never be read as rich text
+        root.nowPlaying = (parts[1] || "").replace(/</g, "\u2039").replace(/>/g, "\u203A")
       }
     }
   }

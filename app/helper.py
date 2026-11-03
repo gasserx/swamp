@@ -10,6 +10,7 @@
 import array
 import cmath
 import json
+import urllib.parse
 import math
 import os
 import subprocess
@@ -49,9 +50,15 @@ def save_cache(force=False):
         _cache_dirty = 0
         data = json.dumps(_cache, separators=(",", ":"))
     try:
-        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+        # private: keys are track paths/URLs, which can carry stream credentials
+        os.makedirs(os.path.dirname(CACHE_PATH), mode=0o700, exist_ok=True)
         tmp = CACHE_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+                       "w", encoding="utf-8") as fh:
             fh.write(data)
         os.replace(tmp, CACHE_PATH)
     except OSError:
@@ -101,11 +108,31 @@ def probe_many(paths):
     save_cache(force=True)
 
 
+def has_secret(url):
+    """True if a URL carries user:pass, a query string or a fragment (often tokens)."""
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return True
+    return bool(u.username or u.password or u.query or u.fragment)
+
+
 def read_tags(src):
     is_url = "://" in src
-    base = src.rstrip("/").rsplit("/", 1)[-1] if is_url else os.path.basename(src)
-    info = {"path": src, "title": os.path.splitext(base)[0] or src, "artist": "",
+    if is_url:
+        try:
+            u = urllib.parse.urlsplit(src)
+            base = urllib.parse.unquote(u.path.rstrip("/").rsplit("/", 1)[-1]) or u.hostname or "stream"
+        except ValueError:
+            base = "stream"
+    else:
+        base = os.path.basename(src)
+    info = {"path": src, "title": os.path.splitext(base)[0] or base, "artist": "",
             "dur": 0, "kbps": 0, "khz": 0, "ch": 2}
+    # ffprobe only takes its input on the command line, where other local users can
+    # read it: never hand it a URL with credentials or tokens (it plays fine, untagged)
+    if is_url and has_secret(src):
+        return info
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format",
@@ -266,6 +293,20 @@ def main():
         print(__doc__)
         return
     cmd, args = sys.argv[1], sys.argv[2:]
+    if cmd == "probe" and args == ["-"]:
+        # paths on stdin (keeps URLs out of the process list); "@file" = a list file
+        # from the launcher, read and then deleted
+        args = []
+        for line in sys.stdin.read().split("\n"):
+            if line.startswith("@"):
+                try:
+                    with open(line[1:], encoding="utf-8") as fh:
+                        args += [x for x in fh.read().split("\n") if x]
+                    os.unlink(line[1:])
+                except OSError:
+                    pass
+            elif line:
+                args.append(line)
     if cmd == "probe":
         def expand():
             for a in args:

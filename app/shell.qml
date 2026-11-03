@@ -215,6 +215,7 @@ ShellRoot {
     fill: Skin.s.lcdBg
     height: 9
     Text {
+      textFormat: Text.PlainText
       anchors.right: parent.right; anchors.rightMargin: 1.5
       anchors.verticalCenter: parent.verticalCenter
       text: parent.value
@@ -241,6 +242,7 @@ ShellRoot {
     }
   }
   component Lbl: Text {
+    textFormat: Text.PlainText
     color: Skin.s.label
     font.family: Skin.s.font; font.pointSize: 3.75; font.bold: true
   }
@@ -293,6 +295,11 @@ ShellRoot {
       id: job
       property bool playFirst: false
       property var pending: []
+      // paths go in on stdin, not argv: stream URLs may carry credentials or tokens,
+      // and process arguments are visible to other local users
+      property string input: ""
+      stdinEnabled: true
+      onStarted: { write(input); stdinEnabled = false }
       // big libraries: collect lines and append them in chunks, not one by one
       function flush() {
         if (!pending.length) return
@@ -317,11 +324,16 @@ ShellRoot {
       onExited: { flush(); destroy() }
     }
   }
+  // list file written by the launcher (0600 in $XDG_RUNTIME_DIR); the helper reads and deletes it
+  function addListFile(file, playFirst) {
+    flash("LOADING...")
+    probeJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: "@" + file + "\n", playFirst: !!playFirst })
+  }
   function addPaths(paths, playFirst) {
     paths = paths.filter(p => p && p.length)
     if (!paths.length) return
     flash("LOADING " + paths.length + (paths.length === 1 ? " ITEM..." : " ITEMS..."))
-    probeJob.createObject(root, { command: ["python3", helper, "probe"].concat(paths), playFirst: !!playFirst })
+    probeJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: paths.join("\n") + "\n", playFirst: !!playFirst })
   }
 
   // ---- transport -----------------------------------------------------------
@@ -400,6 +412,14 @@ ShellRoot {
     blockLoading: true
     printErrors: false
   }
+  // the playlist may hold stream URLs with credentials: keep the state file private
+  // (created 0600 before the first save; FileView keeps an existing file's mode)
+  property bool stateSecured: false
+  Process {
+    running: !root.snap
+    command: ["sh", "-c", "umask 077; mkdir -p \"$(dirname \"$0\")\" && : >> \"$0\" && chmod 600 \"$0\"", root.statePath]
+    onExited: root.stateSecured = true
+  }
   Component.onCompleted: {
     if (snap) { snapSetup(); return }
     try {
@@ -429,6 +449,7 @@ ShellRoot {
     interval: 600
     onTriggered: {
       if (!root.loaded) return
+      if (!root.stateSecured) { restart(); return }
       const list = []
       for (let k = 0; k < tracks.count; k++) {
         const t = tracks.get(k)
@@ -507,6 +528,8 @@ ShellRoot {
     function add(paths: string): void { root.addPaths(paths.split("\n"), false) }
     function open(paths: string): void { root.clearList(); root.addPaths(paths.split("\n"), true) }
     function enqueue(paths: string): void { root.addPaths(paths.split("\n"), !root.playing && !root.paused) }
+    function openList(file: string): void { root.clearList(); root.addListFile(file, true) }
+    function enqueueList(file: string): void { root.addListFile(file, !root.playing && !root.paused) }
     function toggle(): void { if (root.playing) player.pause(); else root.play() }
     function play(): void { root.play() }
     function pause(): void { root.pause() }
@@ -808,6 +831,7 @@ ShellRoot {
               }
             }
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               visible: !root.visOn
               text: "VIS OFF"
@@ -838,9 +862,9 @@ ShellRoot {
             Row {
               id: marq
               y: (clipper.height - t1.height) / 2
-              Text { id: t1; text: clipper.txt.toUpperCase(); color: Skin.s.lcdText; font.family: Skin.s.lcdFont; font.pointSize: 5.25; font.bold: true }
-              Text { visible: clipper.scrolls; text: "   ***   "; color: Skin.s.lcdText; font: t1.font }
-              Text { visible: clipper.scrolls; text: t1.text; color: Skin.s.lcdText; font: t1.font }
+              Text { id: t1; textFormat: Text.PlainText; text: clipper.txt.toUpperCase(); color: Skin.s.lcdText; font.family: Skin.s.lcdFont; font.pointSize: 5.25; font.bold: true }
+              Text { textFormat: Text.PlainText; visible: clipper.scrolls; text: "   ***   "; color: Skin.s.lcdText; font: t1.font }
+              Text { textFormat: Text.PlainText; visible: clipper.scrolls; text: t1.text; color: Skin.s.lcdText; font: t1.font }
             }
             NumberAnimation {
               target: marq
@@ -1002,6 +1026,7 @@ ShellRoot {
               height: 8.6
               Rectangle { anchors.fill: parent; color: row.sel ? Skin.s.selBg : "transparent" }
               Text {
+                textFormat: Text.PlainText
                 id: num
                 x: root.grouped && !row.isDir ? 7 : 1
                 width: parent.width - durTxt.width - x - 5
@@ -1013,6 +1038,7 @@ ShellRoot {
                 font.family: Skin.s.lcdFont; font.pointSize: 4.725; font.bold: row.isDir || row.isCur
               }
               Text {
+                textFormat: Text.PlainText
                 id: durTxt
                 anchors.right: parent.right; anchors.rightMargin: 1
                 anchors.verticalCenter: parent.verticalCenter
@@ -1044,6 +1070,7 @@ ShellRoot {
               }
             }
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               visible: tracks.count === 0
               horizontalAlignment: Text.AlignHCenter
@@ -1104,6 +1131,7 @@ ShellRoot {
             font.family: Skin.s.lcdFont; font.pointSize: 4.5; font.bold: true
             clip: true
             Text {
+              textFormat: Text.PlainText
               visible: !urlInput.text
               text: "http://server/song.mp3 or a path  [enter]"
               color: Skin.s.lcdHint
@@ -1121,6 +1149,7 @@ ShellRoot {
           sunken: true
           fill: Skin.s.lcdBg
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: (root.track ? root.fmt(root.posMs) : "0:00") + " / " + root.fmt(root.totalTime)
             color: Skin.s.lcdText
@@ -1248,6 +1277,7 @@ ShellRoot {
               }
             }
             Text {
+              textFormat: Text.PlainText
               x: 2; y: shot.y + shot.height + 1.2
               width: parent.width - 4
               horizontalAlignment: Text.AlignHCenter
@@ -1274,6 +1304,7 @@ ShellRoot {
           onClicked: root.startBrowse()
         }
         Text {
+          textFormat: Text.PlainText
           id: skinNote
           x: 8; y: picker.height - 10.5
           width: root.pw - 77
@@ -1319,6 +1350,7 @@ ShellRoot {
           sunken: true
           fill: Skin.s.lcdBg
           Text {
+            textFormat: Text.PlainText
             x: 2; width: parent.width - 4
             anchors.verticalCenter: parent.verticalCenter
             elide: Text.ElideRight

@@ -76,6 +76,7 @@ Item {
   }
 
   Text {
+    textFormat: Text.PlainText
     visible: b.label !== ""
     anchors.centerIn: parent
     anchors.horizontalCenterOffset: (b.led ? 2.5 : 0) + (b.down ? 0.5 : 0)
@@ -89,6 +90,7 @@ Item {
   }
 
   Text {
+    textFormat: Text.PlainText
     visible: b.led && b.ledText !== ""
     x: 4.5 - width / 2
     anchors.verticalCenter: parent.verticalCenter
