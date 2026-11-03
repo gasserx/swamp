@@ -47,7 +47,7 @@ ShellRoot {
   property int current: -1
   property real volume: 0.7
   property bool shuffle: false
-  property bool repeat: true
+  property int repeatMode: 2         // 0 off, 1 repeat the song, 2 repeat the playlist
   property bool showPlaylist: true
   property bool showRemaining: false
   property bool visOn: true
@@ -350,8 +350,8 @@ ShellRoot {
       return n
     }
     const n = current + dir
-    if (n >= tracks.count) return repeat ? 0 : -1
-    if (n < 0) return repeat ? tracks.count - 1 : 0
+    if (n >= tracks.count) return repeatMode === 2 ? 0 : -1
+    if (n < 0) return repeatMode === 2 ? tracks.count - 1 : 0
     return n
   }
   function next() { const n = nextIndex(1); if (n >= 0) playIndex(n) }
@@ -408,7 +408,7 @@ ShellRoot {
       if (saved.length) tracks.append(saved)
       if (s.volume !== undefined) volume = s.volume
       shuffle = !!s.shuffle
-      repeat = s.repeat !== undefined ? s.repeat : true
+      repeatMode = s.repeatMode !== undefined ? s.repeatMode : (s.repeat === false ? 0 : 2)
       showPlaylist = s.showPlaylist !== undefined ? s.showPlaylist : true
       showRemaining = !!s.showRemaining
       visOn = s.visOn !== undefined ? s.visOn : true
@@ -436,14 +436,18 @@ ShellRoot {
       }
       stateFile.setText(JSON.stringify({
         tracks: list, current: root.current, volume: root.volume, shuffle: root.shuffle,
-        repeat: root.repeat, showPlaylist: root.showPlaylist, showRemaining: root.showRemaining,
+        repeatMode: root.repeatMode, showPlaylist: root.showPlaylist, showRemaining: root.showRemaining,
         visOn: root.visOn, skin: Skin.name, scale: root.u,
         openDirs: Object.keys(root.openDirs)
       }))
     }
   }
   onShuffleChanged: saveTimer.restart()
-  onRepeatChanged: saveTimer.restart()
+  function cycleRepeat() {
+    repeatMode = (repeatMode + 1) % 3
+    flash("REPEAT: " + ["OFF", "THIS SONG", "WHOLE PLAYLIST"][repeatMode])
+  }
+  onRepeatModeChanged: saveTimer.restart()
   onShowPlaylistChanged: saveTimer.restart()
   onShowRemainingChanged: saveTimer.restart()
   onVisOnChanged: saveTimer.restart()
@@ -461,6 +465,7 @@ ShellRoot {
     audioOutput: AudioOutput { volume: root.volume * root.volume }
     onMediaStatusChanged: {
       if (mediaStatus === MediaPlayer.EndOfMedia) {
+        if (root.repeatMode === 1 && root.current >= 0) { root.playIndex(root.current); return }
         const n = root.nextIndex(1)
         if (n >= 0) root.playIndex(n)
       }
@@ -645,7 +650,7 @@ ShellRoot {
         else if (k === Qt.Key_Up) root.setVolume(root.volume + 0.05)
         else if (k === Qt.Key_Down) root.setVolume(root.volume - 0.05)
         else if (k === Qt.Key_S) root.shuffle = !root.shuffle
-        else if (k === Qt.Key_R) root.repeat = !root.repeat
+        else if (k === Qt.Key_R) root.cycleRepeat()
         else if (k === Qt.Key_K) { root.startBrowse(); Skin.cycle((e.modifiers & Qt.ShiftModifier) ? -1 : 1) }
         else if (k === Qt.Key_Delete) root.removeSelected()
         else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
@@ -897,7 +902,7 @@ ShellRoot {
         }
         Btn { x: 130; y: 85; width: 22; height: 16; icon: "eject"; onClicked: openDialog.open() }
         Btn { x: 158 + root.ex; y: 86; width: 46; height: 14; label: "SHUFFLE"; checkable: true; checked: root.shuffle; onClicked: root.shuffle = checked }
-        Btn { x: 206 + root.ex; y: 86; width: 34; height: 14; label: "REPEAT"; labelSize: 4.6; checkable: true; checked: root.repeat; onClicked: root.repeat = checked }
+        Btn { x: 206 + root.ex; y: 86; width: 34; height: 14; label: "REPEAT"; labelSize: 4.6; led: true; ledText: root.repeatMode === 1 ? "1" : ""; checked: root.repeatMode > 0; onClicked: root.cycleRepeat() }
 
         // badge: music note, opens the skin picker
         Bevel {
@@ -1336,7 +1341,7 @@ ShellRoot {
 
   property real totalTime: 0
   readonly property string tracksStatus: tracks.count + (tracks.count === 1 ? " track" : " tracks")
-                                         + (shuffle ? " · shuffle" : "") + (repeat ? " · repeat" : "")
+                                         + (shuffle ? " · shuffle" : "") + (repeatMode === 2 ? " · repeat" : repeatMode === 1 ? " · repeat song" : "")
   Connections {
     target: tracks
     function onCountChanged() { if (!viewTimer.running) viewTimer.start() }

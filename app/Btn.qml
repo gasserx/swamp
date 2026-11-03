@@ -9,6 +9,8 @@ Item {
   property string label: ""
   property bool checkable: false
   property bool checked: false
+  property bool led: checkable          // show the LED (for buttons that handle clicks themselves)
+  property string ledText: ""         // a lit character in place of the LED dot (e.g. repeat "1")
   property real labelSize: 5.2
   signal clicked()
   width: 23
@@ -76,7 +78,7 @@ Item {
   Text {
     visible: b.label !== ""
     anchors.centerIn: parent
-    anchors.horizontalCenterOffset: (b.checkable ? 2.5 : 0) + (b.down ? 0.5 : 0)
+    anchors.horizontalCenterOffset: (b.led ? 2.5 : 0) + (b.down ? 0.5 : 0)
     anchors.verticalCenterOffset: b.down ? 0.5 : 0
     text: b.label
     color: Skin.s.btnText
@@ -86,8 +88,19 @@ Item {
     font.letterSpacing: 0.3
   }
 
+  Text {
+    visible: b.led && b.ledText !== ""
+    x: 4.5 - width / 2
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenterOffset: b.down ? 0.5 : 0
+    text: b.ledText
+    color: Skin.s.ledOn
+    font.family: Skin.s.font
+    font.pointSize: 4.6 * 0.75
+    font.bold: true
+  }
   Rectangle {
-    visible: b.checkable
+    visible: b.led && b.ledText === ""
     x: 3
     width: 3
     height: 3
