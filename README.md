@@ -1,13 +1,13 @@
 # sWamp
 
 A retro, late-90s style music player for [Omarchy](https://omarchy.org), built with Quickshell.
-It has a spectrum analyzer, a playlist with a folder view for big libraries, and 20 vintage picture skins.
+It has a spectrum analyzer, a playlist with a folder view for big libraries, search and a genre filter, and 20 vintage picture skins.
 A gold **sWamp** button in the Omarchy bar opens it, brings it to you or minimizes it, and its tooltip shows what's playing.
-Update includes find/search function.
+New in 1.2: pick genres with the GENRE button, and search by genre, year or decade.
 
-![sWamp with the Disco Fever skin](docs/main.png)
+![sWamp with the Disco Fever skin: the genre picker (left) and a search for "rock 70s 80s" (right)](docs/disco-find-genre.png)
 
-<p align="center"><img src="docs/skins-trio.png" alt="Surf Shack, Velvet Lounge and Gruvbox skins"></p>
+<p align="center"><img src="docs/skins-six.png" alt="Route 66, Surf Shack, Velvet Lounge, Gruvbox, Night Drive and Cosmic Funk skins"></p>
 
 ## Install
 
@@ -36,7 +36,11 @@ Omarchy (Hyprland + the Omarchy shell) already ships most of these: `quickshell`
 - Plays MP3, FLAC, OGG/Opus, M4A/AAC, WAV, WMA and more, plus `.m3u` playlists and http(s) streams
 - Live 19-band spectrum analyzer with falling peaks (reads PipeWire's sink monitor, no extra packages)
 - Playlist with **folder view**: libraries spread over several folders show collapsible folders with track counts and total time. Handles 20 000+ tracks, and tags are probed in parallel and cached.
-- **Search** the playlist (FIND, `/` or Ctrl+F): filters by artist, title, file or folder name as you type, without changing the play order
+- **Search** the playlist (FIND, `/` or Ctrl+F): filters by artist, title, genre, file or folder name as you type, without changing the play order.
+  `rock + pop` finds either, `1981` a year and `1980s`, `80s` or `'80s` a decade (from the year tag, or a year in the folder name).
+- **Genre filter** (GENRE): one button per genre in your playlist; pick as many as you like, and combine them with a search.
+  Genres come from the files' tags, so they're only as good as your tags: [mp3tidy](https://github.com/gasserx/mp3tidy), a companion music organizer, can help you set correct genres (and tidy album folders) across your library.
+- Skips hidden folders and mp3tidy's holding folder when adding folders
 - Drag & drop, **+FILE / +DIR / +URL**, mounted network shares
 - 20 vintage picture skins with a skin picker (snapshot of the player in each skin) and a live preview bar
 - Resizable (corner grip, Ctrl + wheel, Ctrl +/−/0); maximize keeps the Omarchy bar visible and stretches the layout
@@ -57,7 +61,7 @@ Omarchy (Hyprland + the Omarchy shell) already ships most of these: `quickshell`
 | L | add files | Delete | remove selected |
 | Enter | play selected | Ctrl+A | select all |
 | K / Shift+K | browse skins | F11 | maximize |
-| / or Ctrl+F | search the playlist | Esc | clear search / close picker / cancel browse |
+| / or Ctrl+F | search the playlist | Esc | clear search or genre filter / close picker / cancel browse |
 | Ctrl + / − / 0 | size bigger / smaller / reset | | |
 
 In the search box: ↑ / ↓ move through the matches, Enter plays one, Esc clears the search.
@@ -74,6 +78,8 @@ swamp ipc status                  # "playing<TAB>Artist - Title"
 swamp ipc skin vhs                # switch skin (list them with: swamp ipc skins)
 swamp ipc scale 2                 # window size
 swamp ipc search "live usa"       # filter the playlist (swamp ipc searchClear to reset)
+swamp ipc genre "punk rock"       # pick or unpick a genre (genreClear, genrePicker; hits = "shown/total")
+swamp ipc playlist                # show or hide the playlist
 swamp ipc minimize | restore | fullscreen | quit
 ```
 

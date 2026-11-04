@@ -41,7 +41,8 @@ Singleton {
 
   function select(id) {
     wanted = id
-    const e = pack.find(x => x.id === id) || pack.find(x => x.id === "classic") || {}
+    // unknown id (e.g. a skin from an older version): fall back to Disco Fever
+    const e = pack.find(x => x.id === id) || pack.find(x => x.id === "disco") || pack[0] || {}
     s = Object.assign({}, defaults, e)
     name = e.id || "classic"
   }

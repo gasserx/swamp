@@ -11,6 +11,7 @@ Item {
   property bool checked: false
   property bool led: checkable          // show the LED (for buttons that handle clicks themselves)
   property string ledText: ""         // a lit character in place of the LED dot (e.g. repeat "1")
+  property color ledColor: "transparent" // a fixed LED colour (always lit), e.g. red for CLEAR
   property real labelSize: 5.2
   signal clicked()
   width: 23
@@ -108,7 +109,7 @@ Item {
     height: 3
     y: (b.height - height) / 2
     radius: Skin.s.radius > 0 ? 1.5 : 0.5
-    color: b.checked ? Skin.s.ledOn : Skin.s.ledOff
+    color: b.ledColor.a > 0 ? b.ledColor : (b.checked ? Skin.s.ledOn : Skin.s.ledOff)
     border.width: 0.4
     border.color: Skin.s.btnEdge
   }

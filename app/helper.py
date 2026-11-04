@@ -88,7 +88,7 @@ def tags_of(src):
         return read_tags(src)
     c = cache()
     hit = c.get(src)
-    if hit and hit[:2] == key:
+    if hit and hit[:2] == key and "genre" in hit[2]:  # entries from before genre/year were read: refresh
         return hit[2]
     info = read_tags(src)
     with _cache_lock:
@@ -119,6 +119,35 @@ def has_secret(url):
     return bool(u.username or u.password or u.query or u.fragment)
 
 
+# ID3v1 genre numbers: tags like "(17)" mean "Rock"
+GENRES = ("Blues|Classic Rock|Country|Dance|Disco|Funk|Grunge|Hip-Hop|Jazz|Metal|New Age|Oldies|Other|Pop|R&B|"
+          "Rap|Reggae|Rock|Techno|Industrial|Alternative|Ska|Death Metal|Pranks|Soundtrack|Euro-Techno|Ambient|"
+          "Trip-Hop|Vocal|Jazz+Funk|Fusion|Trance|Classical|Instrumental|Acid|House|Game|Sound Clip|Gospel|Noise|"
+          "Alternative Rock|Bass|Soul|Punk|Space|Meditative|Instrumental Pop|Instrumental Rock|Ethnic|Gothic|"
+          "Darkwave|Techno-Industrial|Electronic|Pop-Folk|Eurodance|Dream|Southern Rock|Comedy|Cult|Gangsta|"
+          "Top 40|Christian Rap|Pop/Funk|Jungle|Native American|Cabaret|New Wave|Psychedelic|Rave|Showtunes|"
+          "Trailer|Lo-Fi|Tribal|Acid Punk|Acid Jazz|Polka|Retro|Musical|Rock & Roll|Hard Rock|Folk|Folk-Rock|"
+          "National Folk|Swing|Fast Fusion|Bebop|Latin|Revival|Celtic|Bluegrass|Avantgarde|Gothic Rock|"
+          "Progressive Rock|Psychedelic Rock|Symphonic Rock|Slow Rock|Big Band|Chorus|Easy Listening|Acoustic|"
+          "Humour|Speech|Chanson|Opera|Chamber Music|Sonata|Symphony|Booty Bass|Primus|Porn Groove|Satire|"
+          "Slow Jam|Club|Tango|Samba|Folklore|Ballad|Power Ballad|Rhythmic Soul|Freestyle|Duet|Punk Rock|"
+          "Drum Solo|A Cappella|Euro-House|Dance Hall|Goa|Drum & Bass|Club-House|Hardcore Techno|Terror|Indie|"
+          "BritPop|Negerpunk|Polsk Punk|Beat|Christian Gangsta Rap|Heavy Metal|Black Metal|Crossover|"
+          "Contemporary Christian|Christian Rock|Merengue|Salsa|Thrash Metal|Anime|JPop|Synthpop").split("|")
+
+
+def clean_genre(raw):
+    """'(17)' -> 'Rock', '(20)Alternative' -> 'Alternative', bare '(0)' (a ripper's 'not set') -> ''."""
+    raw = (raw or "").strip()
+    if re.fullmatch(r"\(?0\)?", raw):
+        return ""
+    text = re.sub(r"\(\d{1,3}\)", "", raw).strip()
+    if text:
+        return "; ".join(p.strip() for p in re.split(r"[;/\x00]", text) if p.strip())
+    names = [GENRES[int(c)] for c in re.findall(r"\d{1,3}", raw) if int(c) < len(GENRES)]
+    return "; ".join(n for n in names if n != "Other")
+
+
 def read_tags(src):
     is_url = "://" in src
     if is_url:
@@ -130,7 +159,7 @@ def read_tags(src):
     else:
         base = os.path.basename(src)
     info = {"path": src, "title": os.path.splitext(base)[0] or base, "artist": "",
-            "dur": 0, "kbps": 0, "khz": 0, "ch": 2}
+            "dur": 0, "kbps": 0, "khz": 0, "ch": 2, "genre": "", "year": ""}
     # ffprobe only takes its input on the command line, where other local users can
     # read it: never hand it a URL with credentials or tokens (it plays fine, untagged)
     if is_url and has_secret(src):
@@ -150,6 +179,12 @@ def read_tags(src):
     if tags.get("title"):
         info["title"] = tags["title"].strip()
     info["artist"] = (tags.get("artist") or tags.get("album_artist") or "").strip()
+    info["genre"] = clean_genre(tags.get("genre"))
+    for k in ("date", "year", "originaldate", "tdor", "tyer", "tory"):
+        m = re.search(r"(19|20)\d\d", tags.get(k) or "")
+        if m:
+            info["year"] = m.group(0)
+            break
     if not tags.get("title") and not info["artist"] and is_url:
         info["title"] = tags.get("icy-name") or info["title"]
     try:
@@ -169,8 +204,13 @@ def read_tags(src):
     return info
 
 
+SKIP_DIRS = {"_mp3tidy_removed"}  # mp3tidy's old holding folder (removed duplicates)
+
+
 def walk(root):
     for d, dirs, files in os.walk(root, followlinks=True):
+        # skip hidden folders (.mp3tidy-removed, .Trash...) and mp3tidy's holding folder
+        dirs[:] = [x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS]
         dirs.sort(key=str.lower)
         for f in sorted(files, key=str.lower):
             if os.path.splitext(f)[1].lower() in AUDIO_EXT:

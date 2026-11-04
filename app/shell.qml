@@ -138,6 +138,26 @@ ShellRoot {
     if (!gr) return []
     return hits ? gr.items.filter(k => hits[k]) : gr.items
   }
+  // genre filter: pick any number of genres; tracks with ANY of them stay (combined with the search box)
+  property var genreSel: ({})          // lower-case genre -> true
+  property bool genrePanel: false
+  property var genreTallyCache: []
+  readonly property int genreCount: Object.keys(genreSel).length
+  function trackGenres(t) { return (t.genre || "").split(/\s*;\s*/).map(g => g.trim()).filter(g => g) }
+  function genreTally() {
+    const n = {}, name = {}
+    for (let k = 0; k < tracks.count; k++)
+      for (const g of trackGenres(tracks.get(k))) { const key = g.toLowerCase(); n[key] = (n[key] || 0) + 1; if (!name[key]) name[key] = g }
+    return Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b)).map(key => ({ key: key, name: name[key], n: n[key] }))
+  }
+  function toggleGenre(key) {
+    const sel = Object.assign({}, genreSel)
+    key = key.toLowerCase()
+    if (sel[key]) delete sel[key]; else sel[key] = true
+    genreSel = sel
+    searchShut = ({}); rebuildView(); list.positionViewAtBeginning()
+  }
+  function clearGenres() { genreSel = ({}); searchShut = ({}); rebuildView() }
   function setQuery(q) {
     if (q === query) return
     query = q
@@ -150,23 +170,48 @@ ShellRoot {
   function trackRow(ti, n, d) {
     return { kind: "track", ti: ti, n: n, dir: d, label: "", count: 0, gdur: 0, open: false, dsel: false }
   }
+  function parseQuery(text) {
+    const years = [], decades = [], rest = []
+    for (const w of text.toLowerCase().replace(/\+/g, " + ").split(/\s+/).filter(w => w)) {
+      let m
+      if ((m = w.match(/^((?:19|20)\d\d)$/))) years.push(Number(m[1]))
+      else if ((m = w.match(/^((?:19|20)\d)0'?s$/))) decades.push(Number(m[1]) * 10)
+      else if ((m = w.match(/^'?(\d)0'?s$/))) decades.push((Number(m[1]) >= 3 ? 1900 : 2000) + Number(m[1]) * 10)
+      else rest.push(w)
+    }
+    const alts = rest.join(" ").split("+").map(a => a.trim().split(/\s+/).filter(w => w)).filter(a => a.length)
+    return { years: years, decades: decades, alts: alts, active: years.length + decades.length + alts.length > 0 }
+  }
+  function trackYear(t) {
+    if (t.year) return Number(t.year)
+    const m = dirOf(t.path).match(/(?:^|[^\d])((?:19|20)\d\d)(?!\d)/)   // no tag: a year in the folder name
+    return m ? Number(m[1]) : 0
+  }
+  function matchTrack(t, q) {
+    if (q.years.length || q.decades.length) {
+      const y = trackYear(t)
+      if (!q.years.some(v => v === y) && !q.decades.some(d => y >= d && y < d + 10)) return false
+    }
+    if (!q.alts.length) return true
+    const hay = (t.artist + "\n" + t.title + "\n" + (t.genre || "") + "\n" + t.path).toLowerCase()
+    return q.alts.some(words => words.every(w => hay.indexOf(w) >= 0))
+  }
   function rebuildView() {
     const order = [], g = {}
     let total = 0
     const sel = {}
-    // every word of the query must appear in artist, title or path (any case)
-    const words = query.toLowerCase().split(/\s+/).filter(w => w)
-    const hit = words.length ? {} : null
+    // search: every word must appear in artist, title, genre or path (any case);
+    // "a + b" = either; 1981 = that year; 1980s / 80s / '80s = that decade
+    const q = parseQuery(query)
+    const gsel = genreSel, gon = Object.keys(gsel).length > 0
+    const hit = q.active || gon ? {} : null
     let nhit = 0
     for (let k = 0; k < tracks.count; k++) {
       const t = tracks.get(k), d = dirOf(t.path)
       if (!g[d]) { g[d] = { items: [], dur: 0 }; order.push(d) }
       g[d].items.push(k); g[d].dur += t.dur; total += t.dur
       if (t.sel) sel[k] = true
-      if (hit) {
-        const hay = (t.artist + "\n" + t.title + "\n" + t.path).toLowerCase()
-        if (words.every(w => hay.indexOf(w) >= 0)) { hit[k] = true; nhit++ }
-      }
+      if (hit && matchTrack(t, q) && (!gon || trackGenres(t).some(g => gsel[g.toLowerCase()]))) { hit[k] = true; nhit++ }
     }
     groups = g; groupOrder = order; selSet = sel; totalTime = total
     hits = hit; hitCount = nhit
@@ -387,7 +432,8 @@ ShellRoot {
           let t
           try { t = JSON.parse(line) } catch (e) { return }
           job.pending.push({ path: t.path, title: t.title, artist: t.artist, dur: t.dur,
-                             kbps: t.kbps, khz: t.khz, ch: t.ch, sel: false })
+                             kbps: t.kbps, khz: t.khz, ch: t.ch, genre: t.genre || "", year: t.year || "",
+                             sel: false })
           if (job.playFirst || job.pending.length >= 500) job.flush()
           else if (!flushTimer.running) flushTimer.start()
         }
@@ -401,6 +447,36 @@ ShellRoot {
   function addListFile(file, playFirst) {
     flash("LOADING...")
     probeJob.createObject(root, { command: ["python3", helper, "probe-list", file], playFirst: !!playFirst })
+  }
+  // fill in genre/year for tracks that were added before sWamp read them (no reloading, no flashing)
+  function refreshMeta(paths) {
+    metaJob.createObject(root, { command: ["python3", helper, "probe", "-"], input: paths.join("\u0000") + "\u0000" })
+  }
+  Component {
+    id: metaJob
+    Process {
+      id: mj
+      property string input: ""
+      stdinEnabled: true
+      onStarted: { write(input); stdinEnabled = false }
+      running: true
+      property var index: null
+      stdout: SplitParser {
+        onRead: line => {
+          let t
+          try { t = JSON.parse(line) } catch (e) { return }
+          if (!mj.index) {
+            mj.index = {}
+            for (let k = 0; k < tracks.count; k++) mj.index[tracks.get(k).path] = k
+          }
+          const k = mj.index[t.path]
+          if (k === undefined || k >= tracks.count || tracks.get(k).path !== t.path) return
+          tracks.setProperty(k, "genre", t.genre || "")
+          tracks.setProperty(k, "year", t.year || "")
+        }
+      }
+      onExited: { saveTimer.restart(); if (root.searching) root.rebuildView(); destroy() }
+    }
   }
   function addPaths(paths, playFirst) {
     paths = paths.filter(p => p && p.length)
@@ -476,7 +552,13 @@ ShellRoot {
     rebuildView()
     saveTimer.restart()
   }
-  function clearList() { player.stop(); player.source = ""; tracks.clear(); selSet = ({}); dselRows = []; current = -1; saveTimer.restart() }
+  function clearList() {
+    player.stop(); player.source = ""; tracks.clear(); selSet = ({}); dselRows = []; current = -1
+    // a new playlist starts unfiltered (an old genre pick or search could hide all of it)
+    genreSel = ({}); genrePanel = false
+    if (query || searchBox.visible) closeSearch()
+    saveTimer.restart()
+  }
 
   // ---- state ---------------------------------------------------------------
   FileView {
@@ -497,8 +579,13 @@ ShellRoot {
     if (snap) { snapSetup(); return }
     try {
       const s = JSON.parse(stateFile.text() || "{}")
-      const saved = (s.tracks || []).map(t => Object.assign({ sel: false, artist: "", dur: 0, kbps: 0, khz: 0, ch: 2 }, t))
+      // tracks mp3tidy has removed (its holding folders) don't belong in the playlist any more
+      const kept = (s.tracks || []).filter(t => !/\/(_mp3tidy_removed|\.mp3tidy-removed)\//.test(t.path || ""))
+      const stale = kept.filter(t => t.genre === undefined && t.path && t.path.indexOf("://") < 0).map(t => t.path)
+      const saved = kept.map(t => Object.assign({ sel: false, artist: "", dur: 0, kbps: 0, khz: 0, ch: 2,
+                                                  genre: "", year: "" }, t))
       if (saved.length) tracks.append(saved)
+      if (stale.length) refreshMeta(stale)
       if (s.volume !== undefined) volume = s.volume
       shuffle = !!s.shuffle
       repeatMode = s.repeatMode !== undefined ? s.repeatMode : (s.repeat === false ? 0 : 2)
@@ -508,7 +595,9 @@ ShellRoot {
       if (s.openDirs) for (const d of s.openDirs) openDirs[d] = true
       Skin.select(s.skin || "disco")
       if (s.scale && !Quickshell.env("SWAMP_SCALE")) u = Math.max(minU, Math.min(maxU, s.scale))
-      current = s.current !== undefined && s.current < tracks.count ? s.current : -1
+      // the current track by path, so taking out removed tracks doesn't shift it
+      const curPath = s.current !== undefined && (s.tracks || [])[s.current] ? s.tracks[s.current].path : ""
+      current = curPath ? kept.findIndex(t => t.path === curPath) : -1
       if (current >= 0) player.source = fileUrl(tracks.get(current).path)
     } catch (e) {}
     loaded = true
@@ -526,7 +615,8 @@ ShellRoot {
       const list = []
       for (let k = 0; k < tracks.count; k++) {
         const t = tracks.get(k)
-        list.push({ path: t.path, title: t.title, artist: t.artist, dur: t.dur, kbps: t.kbps, khz: t.khz, ch: t.ch })
+        list.push({ path: t.path, title: t.title, artist: t.artist, dur: t.dur, kbps: t.kbps, khz: t.khz, ch: t.ch,
+                    genre: t.genre, year: t.year })
       }
       stateFile.setText(JSON.stringify({
         tracks: list, current: root.current, volume: root.volume, shuffle: root.shuffle,
@@ -612,8 +702,9 @@ ShellRoot {
     function restore(): void { root.restore() }
     function fullscreen(): void { root.toggleFullscreen() }
     function minimize(): void { root.minimize() }
-    function skin(id: string): void { Skin.select(id) }
+    function skin(id: string): void { if (Skin.pack.some(x => x.id === id)) Skin.select(id) }
     function picker(): void { root.skinPicker = !root.skinPicker }
+    function playlist(): void { root.showPlaylist = !root.showPlaylist }
     function browse(): void { root.startBrowse() }
     function browseDone(keep: bool): void { root.endBrowse(keep) }
     function scale(v: string): void { root.setScale(Number(v)) }
@@ -624,6 +715,10 @@ ShellRoot {
     }
     function search(q: string): void { root.openSearch(); searchInput.text = q }
     function searchClear(): void { root.closeSearch() }
+    function genre(name: string): void { root.toggleGenre(name) }
+    function genreClear(): void { root.clearGenres() }
+    function genrePicker(): void { root.genreTallyCache = root.genreTally(); root.genrePanel = !root.genrePanel }
+    function hits(): string { return root.searching ? root.hitCount + "/" + tracks.count : "all/" + tracks.count }
     function quit(): void { Qt.quit() }
   }
 
@@ -722,7 +817,11 @@ ShellRoot {
       Keys.onPressed: e => {
         if (urlBox.visible || searchInput.activeFocus) return
         if (e.key === Qt.Key_Slash || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { root.openSearch(); e.accepted = true; return }
-        if (e.key === Qt.Key_Escape && root.searching && !root.skinPicker) { root.closeSearch(); e.accepted = true; return }
+        if (e.key === Qt.Key_Escape && root.genrePanel) { root.genrePanel = false; e.accepted = true; return }
+        if (e.key === Qt.Key_Escape && root.searching && !root.skinPicker) {
+          if (!searchBox.visible && root.genreCount) root.clearGenres(); else root.closeSearch()
+          e.accepted = true; return
+        }
         if (e.key === Qt.Key_Escape && root.skinPicker) { root.skinPicker = false; e.accepted = true; return }
         if (root.skinBrowse) {
           const bk = e.key
@@ -1151,7 +1250,7 @@ ShellRoot {
               anchors.centerIn: parent
               visible: tracks.count === 0 || (root.searching && !root.hitCount)
               horizontalAlignment: Text.AlignHCenter
-              text: tracks.count && root.searching ? "no tracks match \u201C" + root.query + "\u201D" : "drag & drop music here\nor use +FILE / +DIR / +URL below\n\nnetwork share? mount it, then +DIR"
+              text: tracks.count && root.searching ? (root.query ? "no tracks match \u201C" + root.query + "\u201D" + (root.genreCount ? "\nin the picked genres" : "") : "no tracks in the picked genres") : "drag & drop music here\nor use +FILE / +DIR / +URL below\n\nnetwork share? mount it, then +DIR"
               color: Skin.s.lcdHint
               font.family: Skin.s.lcdFont; font.pointSize: 4.5; font.bold: true
               lineHeight: 1.2
@@ -1185,12 +1284,73 @@ ShellRoot {
           x: 6; y: pl.height - 17
           spacing: 2
           visible: !urlBox.visible && !searchBox.visible
-          Btn { width: 30; height: 12; label: "+FILE"; labelSize: 5; onClicked: openDialog.open() }
-          Btn { width: 28; height: 12; label: "+DIR"; labelSize: 5; onClicked: dirDialog.open() }
-          Btn { width: 28; height: 12; label: "+URL"; labelSize: 5; onClicked: { searchBox.visible = false; urlBox.visible = true; urlInput.text = ""; urlInput.forceActiveFocus() } }
-          Btn { width: 26; height: 12; label: "REM"; labelSize: 5; onClicked: root.removeSelected() }
-          Btn { width: 26; height: 12; label: "CLR"; labelSize: 5; onClicked: root.clearList() }
-          Btn { width: 28; height: 12; label: "FIND"; labelSize: 5; onClicked: root.openSearch() }
+          Btn { width: 26; height: 12; label: "+FILE"; labelSize: 5; onClicked: openDialog.open() }
+          Btn { width: 23; height: 12; label: "+DIR"; labelSize: 5; onClicked: dirDialog.open() }
+          Btn { width: 23; height: 12; label: "+URL"; labelSize: 5; onClicked: { searchBox.visible = false; urlBox.visible = true; urlInput.text = ""; urlInput.forceActiveFocus() } }
+          Btn { width: 21; height: 12; label: "REM"; labelSize: 5; onClicked: root.removeSelected() }
+          Btn { width: 20; height: 12; label: "CLR"; labelSize: 5; onClicked: root.clearList() }
+          Btn { width: 23; height: 12; label: "FIND"; labelSize: 5; onClicked: root.openSearch() }
+          Btn {
+            width: 28; height: 12; labelSize: 5
+            label: "GENRE"
+            led: true; checked: root.genreCount > 0      // lit while a genre filter is on
+            onClicked: { root.genreTallyCache = root.genreTally(); root.genrePanel = !root.genrePanel }
+          }
+        }
+
+        // genre picker: one chip per genre in the playlist; pick any number
+        Rectangle {
+          id: genreBox
+          visible: root.genrePanel
+          x: 6; y: 18; width: 263 + root.ex; height: pl.height - 18 - 22
+          color: Skin.s.windowBg                    // solid: picture skins have see-through list colours
+          border.color: Skin.s.bevelDark; border.width: 1
+          z: 5
+          Rectangle { anchors.fill: parent; anchors.margins: 1; color: Skin.s.lcdBg }
+          MouseArea { anchors.fill: parent }      // clicks don't fall through to the playlist
+          Text {
+            id: gTitle
+            x: 4; y: 3
+            textFormat: Text.PlainText
+            text: root.genreCount ? "GENRES - " + root.hitCount + " / " + tracks.count + " TRACKS" : "PICK ONE OR MORE GENRES"
+            color: Skin.s.lcdText
+            font.family: Skin.s.lcdFont; font.pointSize: 4.4; font.bold: true
+          }
+          Row {
+            anchors.right: parent.right; anchors.rightMargin: 3; y: 2
+            spacing: 2
+            Btn { width: 31; height: 10; label: "CLEAR"; labelSize: 4.4; led: true; ledColor: "#e0412f"; onClicked: root.clearGenres() }
+            Btn { width: 28; height: 10; label: "DONE"; labelSize: 4.4; led: true; ledColor: "#5ec26a"; onClicked: root.genrePanel = false }
+          }
+          Flickable {
+            x: 3; y: 15; width: parent.width - 6; height: parent.height - 18
+            clip: true
+            contentHeight: chips.height
+            Flow {
+              id: chips
+              width: parent.width
+              spacing: 2
+              Repeater {
+                model: root.genreTallyCache
+                Btn {
+                  required property var modelData
+                  height: 11; labelSize: 4.4
+                  width: Math.max(26, modelData.name.length * 3.05 + 12)
+                  label: modelData.name
+                  led: true; checked: !!root.genreSel[modelData.key]
+                  onClicked: root.toggleGenre(modelData.key)
+                }
+              }
+            }
+          }
+          Text {
+            anchors.centerIn: parent
+            visible: !root.genreTallyCache.length
+            textFormat: Text.PlainText
+            text: "NO GENRE TAGS IN THIS PLAYLIST"
+            color: Skin.s.lcdHint
+            font.family: Skin.s.lcdFont; font.pointSize: 4.4; font.bold: true
+          }
         }
 
         // search (/ or Ctrl+F): filters the playlist as you type
@@ -1212,7 +1372,7 @@ ShellRoot {
             Text {
               textFormat: Text.PlainText
               visible: !searchInput.text
-              text: "search artist, title, folder...  [esc]"
+              text: "search... e.g. rock + pop 1980s  [esc]"
               color: Skin.s.lcdHint
               font: searchInput.font
             }
