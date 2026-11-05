@@ -1,6 +1,6 @@
 # sWamp
 
-A retro, late-90s style music player for [Omarchy](https://omarchy.org), built with Quickshell.
+A retro, late-90s style music mp3 player for [Omarchy](https://omarchy.org), built with Quickshell.
 It has a spectrum analyzer, a playlist with a folder view for big libraries, search and a genre filter, and 20 vintage picture skins.
 A gold **sWamp** button in the Omarchy bar opens it, brings it to you or minimizes it, and its tooltip shows what's playing.
 New in 1.2: pick genres with the GENRE button, and search by genre, year or decade.
